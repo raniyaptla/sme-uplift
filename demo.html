@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SME Loan Uplift Demo</title>
+<style>
+  :root{--bg:#f6f7fb;--card:#fff;--ink:#1b2333;--mut:#667089;--line:#e2e6ef;--acc:#3253dc;
+        --ok:#0a7d4f;--warn:#b26a00;--bad:#b3261e}
+  @media (prefers-color-scheme:dark){:root{--bg:#10141d;--card:#181e2b;--ink:#e8ecf5;--mut:#98a2b8;--line:#2a3347;--acc:#8ea3ff;--ok:#4cd39a;--warn:#f0b04f;--bad:#ff8a80}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,Segoe UI,sans-serif;padding:20px}
+  main{max-width:920px;margin:0 auto}
+  h1{font-size:22px;margin:0 0 2px} .sub{color:var(--mut);margin:0 0 16px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:720px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
+  .row{margin-bottom:12px} .row label{display:flex;justify-content:space-between;font-weight:600;font-size:13px}
+  .row output{color:var(--acc)} input[type=range]{width:100%;accent-color:var(--acc)}
+  .presets button{margin:0 6px 8px 0;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);cursor:pointer}
+  .big{font-size:34px;font-weight:700} .kv{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--line)}
+  .action{margin-top:12px;padding:12px;border-radius:10px;font-weight:700;border:2px solid}
+  .offer{color:var(--ok)} .regardless{color:var(--warn)} .no{color:var(--bad)}
+  .mut{color:var(--mut);font-size:12.5px} h3{margin:0 0 8px;font-size:14px}
+</style>
+</head>
+<body>
+<main>
+  <h1>Who needs the offer to borrow?</h1>
+  <p class="sub">On-device uplift scoring for SME loan officers &mdash; not who is likely to take a loan, but who needs the promotional rate to take it.</p>
+  <div class="grid">
+    <section class="card">
+      <div class="presets" id="presets"></div>
+      <div id="sliders"></div>
+    </section>
+    <section>
+      <div class="card">
+        <h3>Predicted uplift from a promotional rate</h3>
+        <div class="big" id="uplift">&ndash;</div>
+        <div class="kv"><span>Chance of borrowing with no offer</span><b id="base">&ndash;</b></div>
+        <div class="kv"><span>Chance of borrowing with offer</span><b id="withOffer">&ndash;</b></div>
+        <div class="action" id="action"></div>
+      </div>
+      <div class="card" style="margin-top:16px">
+        <h3>Privacy &amp; performance</h3>
+        <p class="mut" style="margin-top:0">This page runs the trained model locally in your browser. No customer data leaves the device.</p>
+        <div id="telemetry"></div>
+      </div>
+    </section>
+  </div>
+  <p class="mut">Trained on synthetic SME data with a planted causal effect (no real customer data). The browser runs FP32 weights on CPU; NPU figures above come from Qualcomm AI Hub, not this page.</p>
+</main>
+<script src="artifacts/model_weights.js"></script>
+<script src="aihub_results.js"></script>
+<script>
+const UPLIFT_OFFER = 0.04, BASELINE_REGARDLESS = 0.30;   // same rules as deploy_on_snapdragon_npu.py
+const F = [
+  {k:"business_age_years", n:"Business age (years)", min:0.5, max:30, step:0.5},
+  {k:"monthly_revenue_lakh", n:"Monthly revenue (INR lakh)", min:0.5, max:150, step:0.5},
+  {k:"credit_utilization_pct", n:"Credit utilisation (%)", min:0, max:100, step:1},
+  {k:"past_repayment_score", n:"Past repayment score (0-100)", min:0, max:100, step:1},
+  {k:"industry_risk_tier", n:"Industry risk tier", min:0, max:2, step:1, fmt:v=>["Low","Medium","High"][v]},
+  {k:"existing_relationship_months", n:"Months banked with us", min:1, max:240, step:1},
+];
+const PRESETS = {
+  "New mid-size retailer":[3,10,50,75,1,6],
+  "Established manufacturer":[18,120,40,88,0,180],
+  "High-risk, weak repayment":[2,4,85,35,2,8],
+  "Loyal services firm":[8,12,45,80,1,36],
+};
+const relu = x => Math.max(0, x), sig = x => 1/(1+Math.exp(-x));
+function forward(layers, x){
+  let h = x;
+  layers.forEach((l,i)=>{
+    const o = l.b.slice();
+    for(let j=0;j<o.length;j++) for(let k=0;k<h.length;k++) o[j] += h[k]*l.W[k][j];
+    h = o.map(v => i===layers.length-1 ? sig(v) : relu(v));
+  });
+  return h[0];
+}
+const el = id => document.getElementById(id), inputs = [];
+F.forEach((f,i)=>{
+  const d = document.createElement("div"); d.className = "row";
+  d.innerHTML = `<label>${f.n}<output></output></label><input type="range" min="${f.min}" max="${f.max}" step="${f.step}">`;
+  el("sliders").appendChild(d);
+  const r = d.querySelector("input"), o = d.querySelector("output");
+  r.oninput = () => { o.textContent = f.fmt ? f.fmt(+r.value) : r.value; update(); };
+  inputs.push({r,o,f});
+});
+function setValues(v){ inputs.forEach((x,i)=>{ x.r.value = v[i]; x.o.textContent = x.f.fmt ? x.f.fmt(+v[i]) : v[i]; }); update(); }
+Object.entries(PRESETS).forEach(([n,v])=>{
+  const b = document.createElement("button"); b.textContent = n; b.onclick = () => setValues(v); el("presets").appendChild(b);
+});
+function update(){
+  const x = inputs.map(i => +i.r.value);
+  const p0 = forward(MODEL.control, x), p1 = forward(MODEL.treated, x), u = p1 - p0;
+  el("uplift").textContent = (u>=0?"+":"") + (u*100).toFixed(1) + " pts";
+  el("base").textContent = (p0*100).toFixed(1) + "%";
+  el("withOffer").textContent = (p1*100).toFixed(1) + "%";
+  const a = el("action");
+  if(u >= UPLIFT_OFFER){ a.className="action offer"; a.textContent="Offer promotional rate (1.5% reduction)"; }
+  else if(p0 >= BASELINE_REGARDLESS){ a.className="action regardless"; a.textContent="No offer needed \u2014 likely to borrow regardless"; }
+  else { a.className="action no"; a.textContent="Do not extend \u2014 offer unlikely to convert"; }
+}
+(function telemetry(){
+  const t = el("telemetry");
+  if(typeof AIHUB_RESULTS === "undefined" || !AIHUB_RESULTS || AIHUB_RESULTS.inference_ms == null){
+    t.innerHTML = '<div class="mut">NPU figures pending &mdash; run profile_on_ai_hub.py to fill this panel with real Qualcomm AI Hub numbers.</div>'; return;
+  }
+  const r = AIHUB_RESULTS, cu = Object.entries(r.layers_by_compute_unit||{}).map(([k,v])=>k+": "+v).join(", ");
+  const rows = [["Device (hosted on Qualcomm AI Hub)", r.device],["Runtime", r.target_runtime],
+    ["Inference time", r.inference_ms + " ms"],["Peak memory", r.peak_memory_mb + " MB"],["Layers by compute unit", cu]];
+  t.innerHTML = rows.map(([k,v])=>`<div class="kv"><span>${k}</span><b>${v}</b></div>`).join("");
+})();
+setValues(PRESETS["New mid-size retailer"]);
+</script>
+</body>
+</html>

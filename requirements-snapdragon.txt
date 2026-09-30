@@ -1,0 +1,4 @@
+# Only for a Snapdragon X (Windows on ARM) PC: enables the Hexagon NPU path in deploy_on_snapdragon_npu.py.
+# Install INSTEAD of plain onnxruntime on that machine.
+onnxruntime-qnn
+numpy

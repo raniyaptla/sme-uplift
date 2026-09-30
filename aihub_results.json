@@ -1,0 +1,15 @@
+{
+  "device": "Snapdragon X Elite CRD",
+  "device_os": "11",
+  "hosted_on": "Qualcomm AI Hub",
+  "target_runtime": "onnx",
+  "model": "artifacts/uplift_int8.onnx",
+  "compile_job_url": "https://workbench.aihub.qualcomm.com/jobs/jp3zl6635/",
+  "profile_job_url": "https://workbench.aihub.qualcomm.com/jobs/j5m018mdg/",
+  "inference_job_url": "https://workbench.aihub.qualcomm.com/jobs/jgol78rqg/",
+  "timestamp_utc": "2026-09-29T00:00:00+00:00",
+  "inference_ms": 0.042,
+  "peak_memory_mb": 27.9,
+  "layers_total": 20,
+  "layers_by_compute_unit": {"NPU": 19, "CPU": 1}
+}
